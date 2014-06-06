@@ -31,7 +31,7 @@
 
 //#define DEBUG_LAYOUT
 
-CGFloat const MSDynamicsDrawerDefaultOpenStateRevealWidthHorizontal = 267.0;
+CGFloat const MSDynamicsDrawerDefaultOpenStateRevealWidthHorizontal = 256.0;
 CGFloat const MSDynamicsDrawerDefaultOpenStateRevealWidthVertical = 300.0;
 static CGFloat const MSPaneViewVelocityThreshold = 5.0;
 static CGFloat const MSPaneViewVelocityMultiplier = 5.0;
@@ -190,6 +190,11 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
     self.paneGravityBehavior.action = ^{
         [weakSelf didUpdateDynamicAnimatorAction];
     };
+    
+    if (self.leftDirectionShouldStayOpenInLandscape && (UIInterfaceOrientationIsLandscape(self.paneViewController.interfaceOrientation))) {
+        // If user opens the app in lanscape mode we should open it
+        [self setPaneState:MSDynamicsDrawerPaneStateOpen];
+    }
 }
 
 - (void)willRotateToInterfaceOrientation:(UIInterfaceOrientation)toInterfaceOrientation duration:(NSTimeInterval)duration
@@ -252,10 +257,9 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
     self.touchForwardingClasses = [NSMutableSet setWithArray:@[[UISlider class], [UISwitch class]]];
     
     self.drawerView = [UIView new];
-    self.drawerView.autoresizingMask = (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
-    
     self.paneView = [UIView new];
-    self.paneView.autoresizingMask = (UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight);
+    self.leftDirectionShouldStayOpenInLandscape = NO; // This sets the autoresizing masks
+    
     [self.paneView addObserver:self forKeyPath:NSStringFromSelector(@selector(frame)) options:0 context:NULL];
     
     self.panePanGestureRecognizer = [[UIPanGestureRecognizer alloc] initWithTarget:self action:@selector(panePanned:)];
@@ -375,6 +379,7 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
 
 - (void)setDrawerViewController:(UIViewController *)drawerViewController forDirection:(MSDynamicsDrawerDirection)direction
 {
+    
     NSAssert(MSDynamicsDrawerDirectionIsCardinal(direction), @"Only accepts cardinal reveal directions");
     for (UIViewController * __unused currentDrawerViewController in self.drawerViewControllers) {
         NSAssert(currentDrawerViewController != drawerViewController, @"Unable to add a drawer view controller when it's previously been added");
@@ -768,6 +773,14 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
 
 - (void)setPaneState:(MSDynamicsDrawerPaneState)paneState inDirection:(MSDynamicsDrawerDirection)direction animated:(BOOL)animated allowUserInterruption:(BOOL)allowUserInterruption completion:(void (^)(void))completion
 {
+    // If we should stay open in landscape we can't close it when orientation is on landscape
+    if (self.leftDirectionShouldStayOpenInLandscape && (UIInterfaceOrientationIsLandscape(self.paneViewController.interfaceOrientation))
+        && (paneState == MSDynamicsDrawerPaneStateClosed || paneState == MSDynamicsDrawerPaneStateOpenWide)) {
+        [self setViewUserInteractionEnabled:YES];
+        if (completion) completion();
+        return;
+    }
+    
     NSAssert(((self.possibleDrawerDirection & direction) == direction), @"Unable to bounce open with impossible or multiple directions");
     
     // If the pane is already positioned in the desired pane state and direction, don't continue
@@ -936,7 +949,9 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
     self.drawerViewController = self.drawerViewControllers[@(currentDrawerDirection)];
     
     // Disable pane view interaction when not closed
-    [self setPaneViewControllerViewUserInteractionEnabled:(currentDrawerDirection == MSDynamicsDrawerDirectionNone)];
+    BOOL isEnabled = (self.leftDirectionShouldStayOpenInLandscape && (UIInterfaceOrientationIsLandscape(self.paneViewController.interfaceOrientation)));
+    if (!isEnabled) isEnabled = (currentDrawerDirection == MSDynamicsDrawerDirectionNone);
+    [self setPaneViewControllerViewUserInteractionEnabled:isEnabled];
     
     [self updateStylers];
 }
@@ -1021,7 +1036,7 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
 
 - (BOOL)paneTapToCloseEnabledForDirection:(MSDynamicsDrawerDirection)direction
 {
-    NSAssert(MSDynamicsDrawerDirectionIsCardinal(direction), @"Only accepts singular directions when querying for drag reveal enabled");
+    NSAssert(MSDynamicsDrawerDirectionIsCardinal(direction), @"Only accepts singular directions when querying for tap reveal enabled");
     NSNumber *paneTapToCloseEnabled = self.paneTapToCloseEnabled[@(direction)];
     if (!paneTapToCloseEnabled) paneTapToCloseEnabled = @(YES);
     return [paneTapToCloseEnabled boolValue];
@@ -1296,6 +1311,7 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
 - (BOOL)gestureRecognizerShouldBegin:(UIGestureRecognizer *)gestureRecognizer
 {
     if (gestureRecognizer == self.panePanGestureRecognizer) {
+        if (self.leftDirectionShouldStayOpenInLandscape && (UIInterfaceOrientationIsLandscape(self.paneViewController.interfaceOrientation))) return NO;
         if (self.paneDragRequiresScreenEdgePan) {
             MSDynamicsDrawerPaneState paneState;
             if ([self paneViewIsPositionedInValidState:&paneState] && (paneState == MSDynamicsDrawerPaneStateClosed)) {
@@ -1321,6 +1337,9 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
 - (BOOL)gestureRecognizer:(UIGestureRecognizer *)gestureRecognizer shouldReceiveTouch:(UITouch *)touch
 {
     if (gestureRecognizer == self.panePanGestureRecognizer) {
+        
+        if (self.leftDirectionShouldStayOpenInLandscape && (UIInterfaceOrientationIsLandscape(self.paneViewController.interfaceOrientation))) return NO;
+        
         __block BOOL shouldReceiveTouch = YES;
         // Enumerate the view's superviews, checking for a touch-forwarding class
         [touch.view superviewHierarchyAction:^(UIView *view) {
@@ -1338,6 +1357,9 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
         }];
         return shouldReceiveTouch;
     } else if (gestureRecognizer == self.paneTapGestureRecognizer) {
+
+        if (self.leftDirectionShouldStayOpenInLandscape && (UIInterfaceOrientationIsLandscape(self.paneViewController.interfaceOrientation))) return NO;
+        
         MSDynamicsDrawerPaneState paneState;
         if ([self paneViewIsPositionedInValidState:&paneState]) {
             return (paneState != MSDynamicsDrawerPaneStateClosed);
@@ -1374,24 +1396,47 @@ void MSDynamicsDrawerDirectionActionForMaskedValues(NSInteger direction, MSDynam
 - (void)dynamicAnimatorDidPause:(UIDynamicAnimator *)animator
 {
     // If the dynaimc animator has paused while the `panePanGestureRecognizer` is active, ignore it as it's a side effect of removing behaviors, not a resting state
-    if (self.panePanGestureRecognizer.state != UIGestureRecognizerStatePossible) return;
+    if (self.panePanGestureRecognizer.state == UIGestureRecognizerStatePossible) {
+        
+        // Since a resting pane state has been reached, we can remove all behaviors
+        [self.dynamicAnimator removeAllBehaviors];
+        
+        // Update the pane state to the nearest pane state
+        [self _setPaneState:[self nearestPaneState]];
+        
+        // Update pane user interaction appropriately
+        [self setPaneViewControllerViewUserInteractionEnabled:self.leftDirectionShouldStayOpenInLandscape ? YES : (self.paneState == MSDynamicsDrawerPaneStateClosed)];
+        
+        // Since rotation is disabled while the dynamic animator is running, we invoke this method to cause rotation to happen (if device rotation has occured during state transition)
+        [UIViewController attemptRotationToDeviceOrientation];
+        
+    }
     
-    // Since a resting pane state has been reached, we can remove all behaviors
-    [self.dynamicAnimator removeAllBehaviors];
-    
-    // Update the pane state to the nearest pane state
-    [self _setPaneState:[self nearestPaneState]];
-    
-    // Update pane user interaction appropriately
-    [self setPaneViewControllerViewUserInteractionEnabled:(self.paneState == MSDynamicsDrawerPaneStateClosed)];
-    
-    // Since rotation is disabled while the dynamic animator is running, we invoke this method to cause rotation to happen (if device rotation has occured during state transition)
-    [UIViewController attemptRotationToDeviceOrientation];
-    
+    // Always call the completion block
     if (self.dynamicAnimatorCompletion) {
         self.dynamicAnimatorCompletion();
         self.dynamicAnimatorCompletion = nil;
     }
+}
+
+#pragma mark - leftDirectionShouldStayOpenInLandscape
+
+- (void)setLeftDirectionShouldStayOpenInLandscape:(BOOL)leftDirectionShouldStayOpenInLandscape {
+    _leftDirectionShouldStayOpenInLandscape = leftDirectionShouldStayOpenInLandscape;
+    UIViewAutoresizing mask;
+    mask = leftDirectionShouldStayOpenInLandscape ? UIViewAutoresizingFlexibleHeight : (UIViewAutoresizingFlexibleHeight | UIViewAutoresizingFlexibleWidth);
+    self.drawerView.autoresizingMask = mask;
+    self.paneView.autoresizingMask = mask;
+}
+
+- (void)willAnimateRotationToInterfaceOrientation:(UIInterfaceOrientation)orientation duration:(NSTimeInterval)duration
+{
+    if (!self.leftDirectionShouldStayOpenInLandscape) return;
+    if (UIInterfaceOrientationIsLandscape(orientation)) {
+        [self setPaneState:MSDynamicsDrawerPaneStateOpen];
+    } else
+        [self setPaneState:MSDynamicsDrawerPaneStateClosed animated:YES allowUserInterruption:YES completion:nil];
+
 }
 
 @end

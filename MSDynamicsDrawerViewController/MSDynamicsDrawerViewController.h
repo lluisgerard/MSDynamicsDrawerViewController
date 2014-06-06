@@ -164,6 +164,11 @@ typedef NS_ENUM(NSInteger, MSDynamicsDrawerPaneState) {
  */
 @property (nonatomic, assign) BOOL shouldAlignStatusBarToPaneView;
 
+/**
+ If the `paneViewController` and the menu on the left side should stay visible on landscape mode (commonly used on iPad applications).
+ */
+@property (nonatomic, assign) BOOL leftDirectionShouldStayOpenInLandscape;
+
 ///----------------------------------
 /// @name Accessing & Modifying State
 ///----------------------------------
